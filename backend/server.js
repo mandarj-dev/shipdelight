@@ -15,9 +15,26 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // ── PATHS ────────────────────────────────────────────────────
-const DATA_DIR  = path.join(__dirname, '..', 'data');
+// On Vercel only /tmp is writable; use it for runtime data copies.
+const DATA_DIR  = process.env.VERCEL
+  ? path.join('/tmp', 'shipdelight-data')
+  : path.join(__dirname, '..', 'data');
+const SOURCE_DATA = path.join(__dirname, '..', 'data');
 const LR_FILE   = path.join(DATA_DIR, 'lr_numbers.json');
 const USED_FILE = path.join(DATA_DIR, 'used_lr_numbers.json');
+
+function seedDataFromRepo() {
+  if (!process.env.VERCEL) return;
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  for (const name of ['lr_numbers.json', 'used_lr_numbers.json']) {
+    const dest = path.join(DATA_DIR, name);
+    const src  = path.join(SOURCE_DATA, name);
+    if (!fs.existsSync(dest) && fs.existsSync(src)) {
+      fs.copyFileSync(src, dest);
+    }
+  }
+}
+seedDataFromRepo();
 
 // Ensure data dir exists
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -54,8 +71,11 @@ function appendUsed(nums) {
 }
 
 // ── MULTER (CSV upload) ──────────────────────────────────────
+const UPLOAD_TMP = path.join(process.env.VERCEL ? '/tmp' : DATA_DIR, 'uploads_tmp');
+if (!fs.existsSync(UPLOAD_TMP)) fs.mkdirSync(UPLOAD_TMP, { recursive: true });
+
 const upload = multer({
-  dest: path.join(DATA_DIR, 'uploads_tmp'),
+  dest: UPLOAD_TMP,
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) cb(null, true);
     else cb(new Error('Only .csv files allowed'));
@@ -183,10 +203,14 @@ app.delete('/api/reset', (req, res) => {
   res.json({ message: 'Available pool cleared. Used history preserved.' });
 });
 
-// ── START ────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`ShipDelight LR Server running on http://localhost:${PORT}`);
-  console.log(`Data directory: ${DATA_DIR}`);
-  console.log(`LR pool file:   ${LR_FILE}`);
-  console.log(`Used log file:  ${USED_FILE}`);
-});
+// ── EXPORT (Vercel) / START (local) ──────────────────────────
+module.exports = app;
+
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`ShipDelight LR Server running on http://localhost:${PORT}`);
+    console.log(`Data directory: ${DATA_DIR}`);
+    console.log(`LR pool file:   ${LR_FILE}`);
+    console.log(`Used log file:  ${USED_FILE}`);
+  });
+}
