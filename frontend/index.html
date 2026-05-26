@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ShipDelight – LR Print Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ══ MANAGER UI ══ */
+body { font-family:'Barlow',sans-serif; background:#e8e4dc; min-height:100vh; }
+#manager { display:flex; flex-direction:column; align-items:center; padding:40px 20px; min-height:100vh; }
+
+.mgr-brand { font-family:'Barlow Condensed',sans-serif; font-size:32px; font-weight:700; color:#111; letter-spacing:2px; margin-bottom:4px; }
+.mgr-brand span { color:#c8102e; }
+.mgr-sub { font-size:10px; letter-spacing:3px; text-transform:uppercase; color:#888; margin-bottom:28px; }
+
+.mgr-card { background:#fff; border:2px solid #111; box-shadow:6px 6px 0 #111; width:100%; max-width:520px; padding:28px 32px; }
+.mgr-title { font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:#fff; background:#111; margin:-28px -32px 24px; padding:10px 18px; display:flex; justify-content:space-between; align-items:center; }
+.conn-label { font-size:10px; font-weight:400; letter-spacing:1px; opacity:.8; display:flex; align-items:center; gap:6px; }
+.conn-dot { width:8px; height:8px; border-radius:50%; background:#555; transition:background .3s; }
+.conn-dot.online  { background:#4caf50; box-shadow:0 0 6px #4caf50; }
+.conn-dot.offline { background:#c8102e; box-shadow:0 0 6px #c8102e; }
+
+.stats-row { display:flex; gap:0; margin-bottom:22px; border:1.5px solid #111; }
+.stat-box { flex:1; padding:10px 14px; border-right:1.5px solid #111; }
+.stat-box:last-child { border-right:none; }
+.stat-lbl { font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#888; margin-bottom:4px; }
+.stat-val { font-family:'Barlow Condensed',sans-serif; font-size:26px; font-weight:700; color:#111; }
+.stat-box.used  .stat-val { color:#c8102e; }
+.stat-box.green .stat-val { color:#1a7a4a; }
+
+.input-row { display:flex; gap:12px; align-items:flex-end; margin-bottom:18px; }
+.inp-field { flex:1; }
+.inp-field label { display:block; font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#555; margin-bottom:6px; }
+.inp-field input[type=number] { width:100%; border:2px solid #111; font-family:'Barlow Condensed',sans-serif; font-size:28px; font-weight:700; color:#111; padding:8px 12px; outline:none; background:#fff; }
+.inp-field input[type=number]:focus { border-color:#c8102e; }
+
+.btn-print { padding:10px 24px; background:#c8102e; color:#fff; border:2px solid #111; font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:700; letter-spacing:2px; text-transform:uppercase; cursor:pointer; white-space:nowrap; align-self:flex-end; box-shadow:3px 3px 0 #111; transition:background .15s,box-shadow .1s,transform .1s; }
+.btn-print:hover { background:#a50c25; }
+.btn-print:active { transform:translate(2px,2px); box-shadow:1px 1px 0 #111; }
+.btn-print:disabled { background:#bbb; box-shadow:3px 3px 0 #999; cursor:not-allowed; }
+
+.preview-lbl { font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#888; margin-bottom:8px; }
+.lr-chips { display:flex; flex-wrap:wrap; gap:5px; max-height:120px; overflow-y:auto; margin-bottom:4px; min-height:28px; }
+.lr-chip { font-family:'Barlow Condensed',sans-serif; font-size:13px; font-weight:700; padding:3px 9px; border:1.5px solid #111; background:#f5f3ef; color:#111; letter-spacing:1px; }
+
+.alert { padding:10px 14px; font-size:12px; font-weight:600; margin-top:12px; display:none; }
+.alert.err  { background:#fde8ea; border-left:4px solid #c8102e; color:#8b001a; display:block; }
+.alert.ok   { background:#d4edda; border-left:4px solid #1a7a4a; color:#0d5926; display:block; }
+.alert.warn { background:#fff3cd; border-left:4px solid #f0a500; color:#7a4f00; display:block; }
+
+.divider { border:none; border-top:1.5px solid #ddd; margin:20px 0; }
+
+.admin-toggle { font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#888; cursor:pointer; display:flex; align-items:center; gap:6px; margin-bottom:12px; user-select:none; }
+.admin-toggle:hover { color:#111; }
+.admin-panel { display:none; }
+.admin-panel.open { display:block; }
+
+.upload-zone { border:2px dashed #bbb; padding:16px; text-align:center; cursor:pointer; position:relative; transition:border-color .2s,background .2s; margin-bottom:10px; }
+.upload-zone:hover { border-color:#111; background:#f5f3ef; }
+.upload-zone.uploading { border-color:#c8102e; background:#fff5f5; pointer-events:none; }
+.upload-zone input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+.upload-zone .uz-icon { font-size:22px; margin-bottom:6px; }
+.upload-zone .uz-text { font-size:12px; font-weight:600; color:#555; }
+.upload-zone .uz-hint { font-size:10px; color:#aaa; margin-top:3px; }
+
+.btn-secondary { padding:7px 16px; background:#fff; color:#111; border:1.5px solid #111; font-family:'Barlow Condensed',sans-serif; font-size:13px; font-weight:700; letter-spacing:1px; text-transform:uppercase; cursor:pointer; box-shadow:2px 2px 0 #111; transition:background .15s; }
+.btn-secondary:hover { background:#f5f3ef; }
+
+/* spinner */
+.spinner { display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; vertical-align:middle; margin-right:6px; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ══ PRINT AREA ══ */
+#print-area { display:none; }
+
+@media print {
+  #manager    { display:none !important; }
+  #print-area { display:block !important; }
+  body { background:#fff; padding:0; }
+  .page-break { page-break-after:always; }
+  .lr-card { box-shadow:none !important; page-break-inside:avoid; }
+  .section-header, .awb-block, .doc-type { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+}
+
+/* ══ LR CARD (exact from LR_Copy.html) ══ */
+.lr-card { background:#fff; width:100%; max-width:860px; margin:32px auto 48px; border:2px solid #111; box-shadow:6px 6px 0 #111; font-family:'Barlow',sans-serif; }
+.lc-header { display:grid; grid-template-columns:auto 1fr auto; align-items:stretch; border-bottom:2px solid #111; }
+.logo-sd { padding:10px 20px; border-right:2px solid #111; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.logo-sd-icon { font-size:22px; }
+.logo-sd-text { font-family:'Barlow Condensed',sans-serif; font-size:13px; font-weight:600; color:#333; }
+.booking-date-cell { padding:10px 16px; border-right:2px solid #111; display:flex; flex-direction:column; justify-content:center; }
+.booking-date-cell .lbl { font-size:10px; color:#777; text-transform:uppercase; letter-spacing:1px; }
+.booking-date-cell .val { font-family:'Barlow Condensed',sans-serif; font-size:18px; font-weight:700; color:#111; min-width:120px; }
+.awb-block { padding:12px 24px 10px; background:#fff; text-align:center; min-width:260px; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.awb-number { font-family:'Barlow Condensed',sans-serif; font-size:42px; font-weight:700; color:#fff; letter-spacing:4px; line-height:1; margin-bottom:6px; }
+.awb-barcode-wrap { background:#fff; display:inline-block; padding:5px 8px 2px; margin-top:2px; line-height:0; }
+.awb-barcode-wrap svg { display:block; }
+.awb-sub { font-size:10px; color:#aaa; margin-top:5px; }
+.fwd-strip { background:#f5f3ef; border-bottom:1.5px solid #111; padding:5px 14px; display:flex; justify-content:space-between; align-items:center; }
+.fwd-strip .lbl { font-size:10px; color:#888; text-transform:uppercase; letter-spacing:1px; }
+.fwd-strip .val { font-family:'Barlow Condensed',sans-serif; font-size:15px; font-weight:700; color:#111; }
+.badge { font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; border:1.5px solid #111; padding:2px 8px; border-radius:2px; }
+.badge-red { color:#c8102e; border-color:#c8102e; }
+.body-grid { display:grid; grid-template-columns:1fr 1fr; border-bottom:2px solid #111; }
+.col-left { border-right:2px solid #111; }
+.section-header { font-family:'Barlow Condensed',sans-serif; font-size:11px; font-weight:700; letter-spacing:2px; text-transform:uppercase; background:#111; color:#fff; padding:4px 10px; }
+.section-header.light { background:#f0ede8; color:#333; border-bottom:1.5px solid #ddd; }
+.info-grid { display:grid; grid-template-columns:1fr 1fr; border-bottom:1.5px solid #e0ddd8; }
+.info-grid.single { grid-template-columns:1fr; }
+.info-cell { padding:6px 10px; border-right:1.5px solid #e0ddd8; }
+.info-cell:last-child { border-right:none; }
+.info-cell .lbl { font-size:9px; color:#999; text-transform:uppercase; letter-spacing:1px; margin-bottom:2px; }
+.info-cell .val { font-size:13px; font-weight:600; color:#111; }
+.info-cell .val.large { font-family:'Barlow Condensed',sans-serif; font-size:16px; }
+.ship-info-table { width:100%; border-collapse:collapse; }
+.ship-info-table th { background:#f0ede8; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#555; padding:5px 8px; border:1px solid #ddd; text-align:left; }
+.ship-info-table td { font-size:12px; padding:6px 8px; border:1px solid #ddd; color:#111; vertical-align:top; }
+.ship-info-table td.highlight { font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:700; }
+.pod-grid { display:grid; grid-template-columns:1fr 1fr 1fr; border-top:1.5px solid #ddd; }
+.pod-cell { padding:8px 10px; border-right:1.5px solid #ddd; min-height:54px; }
+.pod-cell:last-child { border-right:none; }
+.pod-cell .lbl { font-size:9px; color:#999; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; }
+.checkbox-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+.checkbox-box { width:14px; height:14px; border:1.5px solid #555; border-radius:2px; flex-shrink:0; }
+.checkbox-label { font-size:11px; font-weight:600; color:#111; }
+.sub-text { font-size:10px; color:#777; margin-top:3px; }
+.dash-line { display:inline-block; width:60px; border-bottom:1px solid #aaa; margin-left:4px; vertical-align:middle; }
+.boxes-strip { display:grid; grid-template-columns:1fr 1fr 1fr; border-top:2px solid #111; border-bottom:2px solid #111; background:#f5f3ef; }
+.boxes-cell { padding:8px 12px; border-right:2px solid #111; }
+.boxes-cell:last-child { border-right:none; }
+.boxes-cell .lbl { font-size:9px; color:#888; text-transform:uppercase; letter-spacing:1px; }
+.boxes-cell .val { font-family:'Barlow Condensed',sans-serif; font-size:20px; font-weight:700; color:#111; }
+.req-sig { font-size:11px; color:#555; line-height:1.8; }
+.lc-footer { display:grid; grid-template-columns:1fr auto; align-items:center; padding:10px 14px; gap:20px; border-top:2px solid #111; }
+.footer-addr { font-size:10px; color:#444; line-height:1.6; }
+.footer-addr strong { font-size:12px; color:#111; }
+.doc-type { font-family:'Barlow Condensed',sans-serif; font-size:15px; font-weight:700; letter-spacing:2px; text-transform:uppercase; background:#111; color:#fff; padding:6px 14px; white-space:nowrap; }
+.website { font-size:10px; color:#888; padding:5px 14px; border-top:1px solid #e0ddd8; }
+</style>
+</head>
+<body>
+
+<div id="manager">
+  <div class="mgr-brand"><img src="https://app-admin.shipdelight.com/_nuxt/img/logo.590c33f.svg" alt="ShipDelight" style="height:32px;"></div>
+  <div class="mgr-sub">LR Print Manager</div>
+
+  <div class="mgr-card">
+    <div class="mgr-title">
+      <span>📋 LR Number Series</span>
+      <span class="conn-label">
+        <span class="conn-dot" id="connDot"></span>
+        <span id="connLabel">Connecting…</span>
+      </span>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-box">
+        <div class="stat-lbl">Total</div>
+        <div class="stat-val" id="statTotal">—</div>
+      </div>
+      <div class="stat-box used">
+        <div class="stat-lbl">Used</div>
+        <div class="stat-val" id="statUsed">—</div>
+      </div>
+      <div class="stat-box green">
+        <div class="stat-lbl">Remaining</div>
+        <div class="stat-val" id="statRemain">—</div>
+      </div>
+    </div>
+
+    <div class="input-row">
+      <div class="inp-field">
+        <label>Number of Prints (max 50)</label>
+        <input type="number" id="printCount" min="1" max="50" value="1"/>
+      </div>
+      <button class="btn-print" id="btnPrint" onclick="startPrint()" disabled>🖨 Print</button>
+    </div>
+
+    <div class="preview-lbl">Next LR numbers to be used:</div>
+    <div class="lr-chips" id="lrPreview">
+      <span style="font-size:11px;color:#aaa;">Connecting to server…</span>
+    </div>
+
+    <div id="alertBox" class="alert"></div>
+
+    <hr class="divider"/>
+
+    <div class="admin-toggle" onclick="toggleAdmin()">
+      <span id="adminArrow">▶</span> Admin — Upload New LR Series
+    </div>
+    <div class="admin-panel" id="adminPanel">
+      <div class="upload-zone" id="uploadZone">
+        <input type="file" id="csvFile" accept=".csv"/>
+        <div class="uz-icon">📂</div>
+        <div class="uz-text">Click or drag CSV file here</div>
+        <div class="uz-hint">Column header: <strong>lr_number</strong> — Already-used LRs auto-excluded</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-secondary" onclick="refreshStatus()">↻ Refresh</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="print-area"></div>
+
+<script>
+// ── CONFIG ───────────────────────────────────────────────────
+// Leave empty string for same-origin (when served by the Node server).
+// Change to 'http://your-server-ip:3000' if frontend is hosted separately.
+const API = '';
+
+// ── BOOT ─────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  refreshStatus();
+  document.getElementById('printCount').addEventListener('input', onCountChange);
+  document.getElementById('csvFile').addEventListener('change', e => {
+    if (e.target.files[0]) uploadCSV(e.target.files[0]);
+  });
+  // Refresh every 20s so multiple users stay in sync
+  setInterval(refreshStatus, 20000);
+});
+
+// ── STATUS ───────────────────────────────────────────────────
+let serverNextLRs = [];
+
+async function refreshStatus() {
+  try {
+    const res  = await fetch(`${API}/api/status`);
+    if (!res.ok) throw new Error('bad response');
+    const data = await res.json();
+
+    serverNextLRs = data.next || [];
+
+    document.getElementById('statTotal').textContent  = data.total;
+    document.getElementById('statUsed').textContent   = data.used;
+    document.getElementById('statRemain').textContent = data.available;
+    document.getElementById('btnPrint').disabled      = data.available === 0;
+
+    setConn(true);
+    updatePreviewChips();
+  } catch(e) {
+    setConn(false);
+    document.getElementById('btnPrint').disabled = true;
+    document.getElementById('lrPreview').innerHTML =
+      '<span style="font-size:11px;color:#c8102e;">⚠ Cannot reach server</span>';
+  }
+}
+
+function setConn(online) {
+  document.getElementById('connDot').className   = 'conn-dot ' + (online ? 'online' : 'offline');
+  document.getElementById('connLabel').textContent = online ? 'Server Online' : 'Server Offline';
+}
+
+function updatePreviewChips() {
+  const count = Math.max(1, Math.min(50, parseInt(document.getElementById('printCount').value) || 1));
+  const show  = serverNextLRs.slice(0, count);
+  const el    = document.getElementById('lrPreview');
+  if (!show.length) {
+    el.innerHTML = '<span style="font-size:11px;color:#aaa;">No LR numbers available on server</span>';
+    return;
+  }
+  el.innerHTML = show.map(lr => `<span class="lr-chip">${lr}</span>`).join('');
+  if (count > show.length) {
+    const more = count - show.length;
+    el.innerHTML += `<span style="font-size:11px;color:#aaa;padding:3px 6px;">+${more} more</span>`;
+  }
+}
+
+function onCountChange() { updatePreviewChips(); }
+
+// ── PRINT ────────────────────────────────────────────────────
+async function startPrint() {
+  const count = Math.max(1, Math.min(50, parseInt(document.getElementById('printCount').value) || 1));
+  const btn   = document.getElementById('btnPrint');
+
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spinner"></span>Reserving…';
+
+  try {
+    const res  = await fetch(`${API}/api/checkout`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ count })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      showAlert(data.error || 'Server error — try again.', 'err');
+      refreshStatus();
+      return;
+    }
+
+    // Build and print waybills
+    buildPrintArea(data.lr_numbers);
+    setTimeout(() => window.print(), 600);
+
+    showAlert(`✓ ${data.lr_numbers.length} LR(s) reserved. Remaining on server: ${data.remaining}`, 'ok');
+    refreshStatus();
+
+  } catch(e) {
+    showAlert('Cannot reach server. Check your connection.', 'err');
+  } finally {
+    btn.disabled  = false;
+    btn.innerHTML = '🖨 Print';
+  }
+}
+
+// ── CSV UPLOAD ───────────────────────────────────────────────
+async function uploadCSV(file) {
+  const zone = document.getElementById('uploadZone');
+  zone.classList.add('uploading');
+  zone.querySelector('.uz-text').textContent = 'Uploading…';
+
+  const fd = new FormData();
+  fd.append('csvfile', file);
+
+  try {
+    const res  = await fetch(`${API}/api/upload-csv`, { method:'POST', body:fd });
+    const data = await res.json();
+    if (!res.ok) { showAlert(data.error || 'Upload failed.', 'err'); return; }
+    showAlert(data.message, data.skipped > 0 ? 'warn' : 'ok');
+    refreshStatus();
+  } catch(e) {
+    showAlert('Upload failed — server unreachable.', 'err');
+  } finally {
+    zone.classList.remove('uploading');
+    zone.querySelector('.uz-text').textContent = 'Click or drag CSV file here';
+    document.getElementById('csvFile').value = '';
+  }
+}
+
+// ── UI HELPERS ───────────────────────────────────────────────
+function showAlert(msg, type) {
+  const el = document.getElementById('alertBox');
+  el.textContent = msg;
+  el.className   = 'alert ' + type;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = 'alert', 6000);
+}
+
+function toggleAdmin() {
+  const panel = document.getElementById('adminPanel');
+  const open  = panel.classList.toggle('open');
+  document.getElementById('adminArrow').textContent = open ? '▼' : '▶';
+}
+
+// ── BUILD WAYBILL PAGES ──────────────────────────────────────
+function buildPrintArea(lrList) {
+  const area = document.getElementById('print-area');
+  area.innerHTML = '';
+
+  lrList.forEach((lr, li) => {
+    const isLastLR = li === lrList.length - 1;
+
+    // Shipper Copy — always followed by Receiver Copy so page-break after
+    const w1 = document.createElement('div');
+    w1.innerHTML = lrCardHTML(lr, 'Shipper Copy', false);
+    area.appendChild(w1.firstElementChild);
+
+    // Receiver Copy — page-break only if more LRs follow
+    const w2 = document.createElement('div');
+    w2.innerHTML = lrCardHTML(lr, 'Receiver Copy', isLastLR);
+    area.appendChild(w2.firstElementChild);
+  });
+
+  area.querySelectorAll('svg.jbc').forEach(svg => {
+    try {
+      JsBarcode(svg, svg.dataset.val, {
+        format:       'CODE128',
+        width:        2.2,
+        height:       50,
+        displayValue: true,
+        font:         'Barlow Condensed',
+        fontSize:     14,
+        textMargin:   4,
+        margin:       0,
+        lineColor:    '#111',
+        background:   '#ffffff'
+      });
+    } catch(e) { console.warn(e); }
+  });
+}
+
+// ── LR CARD HTML (exact from LR_Copy.html) ───────────────────
+function lrCardHTML(lr, copyLabel, noBreak) {
+  return `
+<div class="lr-card${noBreak ? '' : ' page-break'}">
+  <div class="lc-header">
+    <div class="logo-sd">
+      <div class="logo-sd-icon"><img src="https://app-admin.shipdelight.com/_nuxt/img/logo.590c33f.svg" alt="ShipDelight" style="height:32px;"></div>
+      <div class="logo-sd-text"></div>
+    </div>
+    <div class="booking-date-cell">
+      <div class="lbl">Booking Date</div>
+      <div class="val">&nbsp;</div>
+    </div>
+    <div class="awb-block">
+      <!--div class="awb-number">${lr}</div-->
+      <div class="awb-barcode-wrap">
+        <svg class="jbc" data-val="${lr}"></svg>
+      </div>
+      <!--div class="awb-sub">LR / AWB Number</div-->
+    </div>
+  </div>
+
+  <div class="fwd-strip">
+    <div>
+      <div class="lbl">Forwarding / LR Number</div>
+      <div class="val">${lr}</div>
+    </div>
+    <span class="badge badge-red">Self Drop</span>
+  </div>
+
+  <div class="body-grid">
+    <div class="col-left">
+      <div class="section-header">Shipment Picked From</div>
+      <div class="info-grid single"><div class="info-cell"><div class="lbl">Shipper's Name</div><div class="val large">&nbsp;</div></div></div>
+      <div class="info-grid">
+        <div class="info-cell"><div class="lbl">Phone No.</div><div class="val">&nbsp;</div></div>
+        <div class="info-cell"><div class="lbl">GSTIN</div><div class="val">&nbsp;</div></div>
+      </div>
+      <div class="info-grid single"><div class="info-cell"><div class="lbl">Street</div><div class="val">&nbsp;</div></div></div>
+      <div class="info-grid">
+        <div class="info-cell"><div class="lbl">City</div><div class="val">&nbsp;</div></div>
+        <div class="info-cell"><div class="lbl">State</div><div class="val">&nbsp;</div></div>
+      </div>
+      <div class="info-grid single"><div class="info-cell"><div class="lbl">Pincode</div><div class="val">&nbsp;</div></div></div>
+      <div class="section-header light" style="margin-top:2px;">Shipment Information</div>
+      <div class="info-grid">
+        <div class="info-cell"><div class="lbl">Shipper's Ref No.</div><div class="val">&nbsp;</div></div>
+        <div class="info-cell"><div class="lbl">Service</div><div class="val">&nbsp;</div></div>
+      </div>
+      <div class="info-grid">
+        <div class="info-cell"><div class="lbl">Invoice No.</div><div class="val">&nbsp;</div></div>
+        <div class="info-cell"><div class="lbl">EWBN</div><div class="val">&nbsp;</div></div>
+      </div>
+      <div class="info-grid">
+        <div class="info-cell"><div class="lbl">Invoice Value</div><div class="val large">₹ &nbsp;</div></div>
+        <div class="info-cell"><div class="lbl">Freight Payment</div><div class="val">&nbsp;</div></div>
+      </div>
+      <div class="info-grid">
+        <div class="info-cell"><div class="lbl">Master AWB</div><div class="val">&nbsp;</div></div>
+        <div class="info-cell"><div class="lbl">POD on Invoice</div><div class="val">&nbsp;</div></div>
+      </div>
+      <table class="ship-info-table" style="margin-top:4px;">
+        <thead><tr><th>Dimensions (L×B×H) cm</th><th>Actual Wt (kg)</th><th>Said to Contain</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="highlight">&nbsp;&nbsp;&nbsp;&nbsp; × &nbsp;&nbsp;&nbsp;&nbsp; × &nbsp;&nbsp;&nbsp;&nbsp; BOX</td>
+            <td class="highlight">&nbsp;</td>
+            <td>Others</td>
+          </tr>
+          <tr>
+            <td style="text-align:center;color:#888;font-size:11px;">Chargeable Wt (kg)</td>
+            <td></td><td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col-right">
+      <div class="section-header">Shipment Delivered To</div>
+      <div class="info-grid single"><div class="info-cell"><div class="lbl">Recipient's Name</div><div class="val large">&nbsp;</div></div></div>
+      <div class="info-grid">
+        <div class="info-cell"><div class="lbl">Phone No.</div><div class="val">&nbsp;</div></div>
+        <div class="info-cell"><div class="lbl">GSTIN</div><div class="val">&nbsp;</div></div>
+      </div>
+      <div class="info-grid single"><div class="info-cell"><div class="lbl">Street</div><div class="val">&nbsp;</div></div></div>
+      <div class="info-grid">
+        <div class="info-cell"><div class="lbl">City</div><div class="val">&nbsp;</div></div>
+        <div class="info-cell"><div class="lbl">State</div><div class="val">&nbsp;</div></div>
+      </div>
+      <div class="info-grid single"><div class="info-cell"><div class="lbl">Pincode</div><div class="val">&nbsp;</div></div></div>
+      <div class="info-grid single"><div class="info-cell"><div class="lbl">Address / Store Code</div><div class="val">&nbsp;</div></div></div>
+      <div class="pod-grid">
+        <div class="pod-cell">
+          <div class="checkbox-row"><div class="checkbox-box"></div><span class="checkbox-label">ALL OKAY</span></div>
+          <div class="lbl">Date of Receipt</div>
+          <div style="height:18px;"></div>
+          <div class="lbl">Time of Receipt</div>
+        </div>
+        <div class="pod-cell">
+          <div class="checkbox-row"><div class="checkbox-box"></div><span class="checkbox-label">SHORT BOX?</span></div>
+          <div class="sub-text">If yes, no. of short boxes: <span class="dash-line"></span></div>
+          <div style="margin-top:10px;"><div class="lbl">POD Remarks</div></div>
+        </div>
+        <div class="pod-cell">
+          <div class="lbl">Receiver's Sign</div>
+          <div style="height:30px;"></div>
+          <div class="lbl" style="margin-top:6px;">Stamp / Seal</div>
+        </div>
+      </div>
+      <div class="pod-grid" style="border-top:1.5px solid #ddd;">
+        <div class="pod-cell" style="grid-column:span 2;border-right:1.5px solid #ddd;">
+          <div class="checkbox-row"><div class="checkbox-box"></div><span class="checkbox-label">DAMAGED CONTENT?</span></div>
+          <div class="sub-text">If yes, no. of boxes having damaged content: <span class="dash-line"></span></div>
+        </div>
+        <div class="pod-cell">
+          <div class="checkbox-row"><div class="checkbox-box"></div><span class="checkbox-label" style="font-size:10px;">ITEMS MISSING IN RECEIVED BOXES?</span></div>
+          <div class="sub-text">If yes, mention AWB no(s) of boxes having pilferage:</div>
+          <div style="height:8px;"></div>
+          <div class="sub-text">If yes, no. of short items: <span class="dash-line" style="width:30px;"></span></div>
+          <div class="sub-text" style="margin-top:4px;">Please describe the short items:</div>
+        </div>
+      </div>
+      <div style="padding:6px 10px;border-top:1.5px solid #ddd;">
+        <div class="sub-text">Or, phone no in lieu of stamp:</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="boxes-strip">
+    <div class="boxes-cell">
+      <div class="lbl">Total Number of Boxes</div>
+      <div class="val">&nbsp;</div>
+    </div>
+    <div class="boxes-cell" style="grid-column:span 2;border-right:none;">
+      <div class="lbl">Required Signature</div>
+      <div class="req-sig">Employee ID: ………………<br>Shipper's Sign: ………………</div>
+    </div>
+  </div>
+
+  <div class="lc-footer">
+    <div class="footer-addr">
+      <strong>ShipDelight Logistics Technologies Pvt. Ltd.</strong><br>
+      Registered Office: 402, Town Centre 2, Opp Times Square Building, Andheri - Kurla Rd, Marol, Andheri East, Mumbai – 400059<br>
+      GST No: 27AAVCS3260N1ZK
+    </div>
+    <div class="doc-type">${copyLabel}</div>
+  </div>
+  <div class="website">For terms and conditions visit <a href="http://www.shipdelight.com" style="color:#c8102e;">www.shipdelight.com</a></div>
+</div>`;
+}
+</script>
+</body>
+</html>
