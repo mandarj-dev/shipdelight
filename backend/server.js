@@ -15,26 +15,9 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // ── PATHS ────────────────────────────────────────────────────
-// On Vercel only /tmp is writable; use it for runtime data copies.
-const DATA_DIR  = process.env.VERCEL
-  ? path.join('/tmp', 'shipdelight-data')
-  : path.join(__dirname, '..', 'data');
-const SOURCE_DATA = path.join(__dirname, '..', 'data');
+const DATA_DIR  = path.join(__dirname, '..', 'data');
 const LR_FILE   = path.join(DATA_DIR, 'lr_numbers.json');
 const USED_FILE = path.join(DATA_DIR, 'used_lr_numbers.json');
-
-function seedDataFromRepo() {
-  if (!process.env.VERCEL) return;
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  for (const name of ['lr_numbers.json', 'used_lr_numbers.json']) {
-    const dest = path.join(DATA_DIR, name);
-    const src  = path.join(SOURCE_DATA, name);
-    if (!fs.existsSync(dest) && fs.existsSync(src)) {
-      fs.copyFileSync(src, dest);
-    }
-  }
-}
-seedDataFromRepo();
 
 // Ensure data dir exists
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -71,11 +54,8 @@ function appendUsed(nums) {
 }
 
 // ── MULTER (CSV upload) ──────────────────────────────────────
-const UPLOAD_TMP = path.join(process.env.VERCEL ? '/tmp' : DATA_DIR, 'uploads_tmp');
-if (!fs.existsSync(UPLOAD_TMP)) fs.mkdirSync(UPLOAD_TMP, { recursive: true });
-
 const upload = multer({
-  dest: UPLOAD_TMP,
+  dest: path.join(DATA_DIR, 'uploads_tmp'),
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) cb(null, true);
     else cb(new Error('Only .csv files allowed'));
@@ -148,7 +128,7 @@ app.post('/api/checkout', (req, res) => {
 /**
  * POST /api/upload-csv
  * Admin: Upload a new CSV of LR numbers
- * Existing available pool is REPLACED (used history kept)
+ * New LRs are APPENDED to the existing pool (duplicates & used ones excluded)
  */
 app.post('/api/upload-csv', upload.single('csvfile'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -167,17 +147,27 @@ app.post('/api/upload-csv', upload.single('csvfile'), (req, res) => {
     .on('end', () => {
       fs.unlinkSync(tmpPath); // clean up tmp
 
-      const fresh    = results.filter(lr => !usedNums.has(lr));
-      const skipped  = results.length - fresh.length;
+      // Filter out already-used LRs
+      const fresh   = results.filter(lr => !usedNums.has(lr));
+      const skipped = results.length - fresh.length;
 
-      writeLR(fresh);
+      // APPEND to existing pool (deduplicate to avoid double entries)
+      const existing  = readLR();
+      const existSet  = new Set(existing);
+      const newOnly   = fresh.filter(lr => !existSet.has(lr));
+      const duplicate = fresh.length - newOnly.length;
+      const merged    = [...existing, ...newOnly];
 
-      console.log(`[${new Date().toISOString()}] CSV uploaded: ${results.length} total, ${fresh.length} fresh, ${skipped} already-used skipped`);
+      writeLR(merged);
+
+      console.log(`[${new Date().toISOString()}] CSV uploaded: ${results.length} total, ${newOnly.length} appended, ${skipped} already-used skipped, ${duplicate} duplicates ignored | Pool now: ${merged.length}`);
 
       res.json({
-        message:  `Loaded ${fresh.length} LR number(s).${skipped > 0 ? ` ${skipped} already-used skipped.` : ''}`,
-        loaded:   fresh.length,
+        message:  `Appended ${newOnly.length} new LR number(s). Pool total: ${merged.length}.${skipped > 0 ? ` ${skipped} already-used excluded.` : ''}${duplicate > 0 ? ` ${duplicate} duplicates ignored.` : ''}`,
+        appended:  newOnly.length,
+        pool_total: merged.length,
         skipped,
+        duplicate,
         total:    results.length
       });
     })
@@ -203,14 +193,10 @@ app.delete('/api/reset', (req, res) => {
   res.json({ message: 'Available pool cleared. Used history preserved.' });
 });
 
-// ── EXPORT (Vercel) / START (local) ──────────────────────────
-module.exports = app;
-
-if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`ShipDelight LR Server running on http://localhost:${PORT}`);
-    console.log(`Data directory: ${DATA_DIR}`);
-    console.log(`LR pool file:   ${LR_FILE}`);
-    console.log(`Used log file:  ${USED_FILE}`);
-  });
-}
+// ── START ────────────────────────────────────────────────────
+app.listen(PORT, () => {
+  console.log(`ShipDelight LR Server running on http://localhost:${PORT}`);
+  console.log(`Data directory: ${DATA_DIR}`);
+  console.log(`LR pool file:   ${LR_FILE}`);
+  console.log(`Used log file:  ${USED_FILE}`);
+});
