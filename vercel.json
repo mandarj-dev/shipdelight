@@ -1,6 +1,6 @@
 {
-  "installCommand": "npm install",
+  "installCommand": "npm install && node -e \"require('fs').mkdirSync('public',{recursive:true});require('fs').copyFileSync('frontend/index.html','public/index.html')\"",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api" }
+    { "source": "/api/(.*)", "destination": "/api" }
   ]
 }

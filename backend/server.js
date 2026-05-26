@@ -15,12 +15,26 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // ── PATHS ────────────────────────────────────────────────────
-const DATA_DIR  = path.join(__dirname, '..', 'data');
-const LR_FILE   = path.join(DATA_DIR, 'lr_numbers.json');
-const USED_FILE = path.join(DATA_DIR, 'used_lr_numbers.json');
+// Vercel: only /tmp is writable. Local: use repo data/ folder.
+const SOURCE_DATA = path.join(__dirname, '..', 'data');
+const DATA_DIR    = process.env.VERCEL
+  ? path.join('/tmp', 'shipdelight-data')
+  : SOURCE_DATA;
+const LR_FILE     = path.join(DATA_DIR, 'lr_numbers.json');
+const USED_FILE   = path.join(DATA_DIR, 'used_lr_numbers.json');
 
-// Ensure data dir exists
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!process.env.VERCEL) return;
+  for (const name of ['lr_numbers.json', 'used_lr_numbers.json']) {
+    const dest = path.join(DATA_DIR, name);
+    const src  = path.join(SOURCE_DATA, name);
+    if (!fs.existsSync(dest) && fs.existsSync(src)) {
+      fs.copyFileSync(src, dest);
+    }
+  }
+}
+ensureDataDir();
 
 // ── HELPERS ──────────────────────────────────────────────────
 function readLR() {
@@ -54,8 +68,11 @@ function appendUsed(nums) {
 }
 
 // ── MULTER (CSV upload) ──────────────────────────────────────
+const UPLOAD_TMP = path.join(process.env.VERCEL ? '/tmp' : DATA_DIR, 'uploads_tmp');
+if (!fs.existsSync(UPLOAD_TMP)) fs.mkdirSync(UPLOAD_TMP, { recursive: true });
+
 const upload = multer({
-  dest: path.join(DATA_DIR, 'uploads_tmp'),
+  dest: UPLOAD_TMP,
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) cb(null, true);
     else cb(new Error('Only .csv files allowed'));
@@ -66,8 +83,10 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
-// Serve frontend from /frontend folder
-app.use(express.static(path.join(__dirname, '..', 'frontend')));
+// Local dev: serve frontend. On Vercel, static files live in public/ (see vercel.json).
+if (!process.env.VERCEL) {
+  app.use(express.static(path.join(__dirname, '..', 'frontend')));
+}
 
 // ── ROUTES ───────────────────────────────────────────────────
 
@@ -193,10 +212,21 @@ app.delete('/api/reset', (req, res) => {
   res.json({ message: 'Available pool cleared. Used history preserved.' });
 });
 
-// ── START ────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`ShipDelight LR Server running on http://localhost:${PORT}`);
-  console.log(`Data directory: ${DATA_DIR}`);
-  console.log(`LR pool file:   ${LR_FILE}`);
-  console.log(`Used log file:  ${USED_FILE}`);
+app.use((err, req, res, _next) => {
+  console.error('Unhandled error:', err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
 });
+
+// ── EXPORT (Vercel) / START (local only) ─────────────────────
+module.exports = app;
+
+if (!process.env.VERCEL && require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`ShipDelight LR Server running on http://localhost:${PORT}`);
+    console.log(`Data directory: ${DATA_DIR}`);
+    console.log(`LR pool file:   ${LR_FILE}`);
+    console.log(`Used log file:  ${USED_FILE}`);
+  });
+}
