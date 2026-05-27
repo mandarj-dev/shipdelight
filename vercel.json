@@ -1,5 +1,10 @@
 {
   "installCommand": "npm install && node -e \"require('fs').mkdirSync('public',{recursive:true});require('fs').copyFileSync('frontend/index.html','public/index.html')\"",
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" }
   ]

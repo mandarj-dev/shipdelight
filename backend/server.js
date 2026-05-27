@@ -2,6 +2,9 @@
  * ShipDelight LR Number Server
  * MongoDB-backed central store for LR numbers
  * Shared across all users — each LR is consumed (deleted) once printed
+ *
+ * Local:  node server.js  (listens on PORT)
+ * Vercel: exported via api/index.js — lazy DB connect, no app.listen()
  */
 
 const express  = require('express');
@@ -14,34 +17,66 @@ const { Readable } = require('stream');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+const IS_VERCEL = Boolean(process.env.VERCEL);
 
 // ── MONGODB CONFIG ────────────────────────────────────────────
-// Set MONGO_URI in your environment, or edit the default below.
-// Examples:
-//   Local:   mongodb://localhost:27017
-//   Atlas:   mongodb+srv://user:pass@cluster.mongodb.net
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://micky:E9VTPG3QqDM1@st-db.shipdelight.com:27017/';
 const DB_NAME   = process.env.DB_NAME   || 'smart_tracking';
 
-let db;
-let lrPool;   // collection: lr_pool   — available LR numbers
-let lrUsed;   // collection: lr_used   — permanently used LR numbers
+let lrPool;
+let lrUsed;
 
-// ── CONNECT TO MONGODB ────────────────────────────────────────
+// Reuse one client across warm serverless invocations (see MongoDB serverless guidance)
+let mongoClient;
+let connectPromise;
+let indexesEnsured = false;
+
 async function connectDB() {
-  const client = new MongoClient(MONGO_URI);
-  await client.connect();
-  db     = client.db(DB_NAME);
-  lrPool = db.collection('lr_pool');
-  lrUsed = db.collection('lr_used');
+  if (lrPool && lrUsed) return;
 
-  // Unique index on lr_number for both collections
-  await lrPool.createIndex({ lr_number: 1 }, { unique: true });
-  await lrUsed.createIndex({ lr_number: 1 }, { unique: true });
-  // Index for insertion order (sequential checkout)
-  await lrPool.createIndex({ seq: 1 });
+  if (!connectPromise) {
+    connectPromise = (async () => {
+      mongoClient = new MongoClient(MONGO_URI, {
+        maxPoolSize: 5,
+        minPoolSize: 0,
+        maxIdleTimeMS: 20_000,
+        connectTimeoutMS: 15_000,
+        serverSelectionTimeoutMS: 15_000,
+      });
+      await mongoClient.connect();
+      const db = mongoClient.db(DB_NAME);
+      lrPool = db.collection('lr_pool');
+      lrUsed = db.collection('lr_used');
 
-  console.log(`✅ MongoDB connected: ${MONGO_URI} / ${DB_NAME}`);
+      if (!indexesEnsured) {
+        await lrPool.createIndex({ lr_number: 1 }, { unique: true });
+        await lrUsed.createIndex({ lr_number: 1 }, { unique: true });
+        await lrPool.createIndex({ seq: 1 });
+        indexesEnsured = true;
+      }
+
+      console.log(`MongoDB connected: ${DB_NAME}`);
+    })().catch(err => {
+      connectPromise = null;
+      throw err;
+    });
+  }
+
+  await connectPromise;
+}
+
+// Ensure DB is ready before API handlers (required on Vercel cold starts)
+async function dbMiddleware(req, res, next) {
+  try {
+    await connectDB();
+    next();
+  } catch (e) {
+    console.error('MongoDB connection failed:', e.message);
+    res.status(503).json({
+      error: 'Database unavailable. Check MONGO_URI on Vercel and that MongoDB allows external connections.',
+      detail: IS_VERCEL ? e.message : undefined,
+    });
+  }
 }
 
 // ── MULTER (CSV upload — memory storage, no temp files) ───────
@@ -58,14 +93,16 @@ const upload = multer({
 // ── MIDDLEWARE ────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '..', 'frontend')));
+
+// Vercel serves static files from public/ (see vercel.json installCommand)
+if (!IS_VERCEL) {
+  app.use(express.static(path.join(__dirname, '..', 'frontend')));
+}
+
+app.use('/api', dbMiddleware);
 
 // ── ROUTES ────────────────────────────────────────────────────
 
-/**
- * GET /api/status
- * Live count of available / used LR numbers + next 5 preview
- */
 app.get('/api/status', async (req, res) => {
   try {
     const available = await lrPool.countDocuments();
@@ -80,11 +117,6 @@ app.get('/api/status', async (req, res) => {
   }
 });
 
-/**
- * POST /api/checkout
- * Body: { count: number }
- * Atomically reserves N LR numbers, moves them to lr_used, returns them
- */
 app.post('/api/checkout', async (req, res) => {
   const count = parseInt(req.body.count);
   if (!count || count < 1 || count > 50)
@@ -100,15 +132,12 @@ app.post('/api/checkout', async (req, res) => {
         available
       });
 
-    // Fetch the next N by insertion order
     const docs  = await lrPool.find().sort({ seq: 1 }).limit(count).toArray();
     const batch = docs.map(d => d.lr_number);
     const ids   = docs.map(d => d._id);
 
-    // Remove from pool
     await lrPool.deleteMany({ _id: { $in: ids } });
 
-    // Record as used (ignore duplicates — $set upsert)
     const usedOps = batch.map(lr => ({
       updateOne: {
         filter: { lr_number: lr },
@@ -128,30 +157,21 @@ app.post('/api/checkout', async (req, res) => {
   }
 });
 
-/**
- * POST /api/upload-csv
- * Admin: Upload a CSV of LR numbers
- * New LRs APPENDED — already-used & duplicates automatically excluded
- */
 app.post('/api/upload-csv', upload.single('csvfile'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
   try {
-    // Parse CSV from memory buffer
     const results = await parseCSVBuffer(req.file.buffer);
 
     if (!results.length)
       return res.status(400).json({ error: 'No LR numbers found in CSV.' });
 
-    // Fetch all already-used LR numbers
     const usedDocs = await lrUsed.find({}, { projection: { lr_number: 1 } }).toArray();
     const usedSet  = new Set(usedDocs.map(d => d.lr_number));
 
-    // Fetch all already-in-pool LR numbers
     const poolDocs = await lrPool.find({}, { projection: { lr_number: 1 } }).toArray();
     const poolSet  = new Set(poolDocs.map(d => d.lr_number));
 
-    // Determine the next sequence number
     const maxSeqDoc = await lrPool.find().sort({ seq: -1 }).limit(1).toArray();
     let   seq       = maxSeqDoc.length ? maxSeqDoc[0].seq + 1 : 1;
 
@@ -183,10 +203,6 @@ app.post('/api/upload-csv', upload.single('csvfile'), async (req, res) => {
   }
 });
 
-/**
- * GET /api/used
- * Admin: List all used LR numbers with timestamps
- */
 app.get('/api/used', async (req, res) => {
   try {
     const docs = await lrUsed.find().sort({ used_at: -1 }).toArray();
@@ -196,10 +212,6 @@ app.get('/api/used', async (req, res) => {
   }
 });
 
-/**
- * DELETE /api/reset
- * Admin: Clear available pool only (used history preserved)
- */
 app.delete('/api/reset', async (req, res) => {
   try {
     const result = await lrPool.deleteMany({});
@@ -209,7 +221,6 @@ app.delete('/api/reset', async (req, res) => {
   }
 });
 
-// ── CSV PARSER (from buffer) ──────────────────────────────────
 function parseCSVBuffer(buffer) {
   return new Promise((resolve, reject) => {
     const results = [];
@@ -225,17 +236,26 @@ function parseCSVBuffer(buffer) {
   });
 }
 
-// ── START ─────────────────────────────────────────────────────
-connectDB()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`🚚 ShipDelight LR Server → http://localhost:${PORT}`);
-      console.log(`   MongoDB: ${MONGO_URI} / DB: ${DB_NAME}`);
-      console.log(`   Collections: lr_pool (available) | lr_used (permanent log)`);
+app.use((err, req, res, _next) => {
+  console.error('Unhandled error:', err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+// Vercel serverless entry (api/index.js requires this export)
+module.exports = app;
+
+if (!IS_VERCEL && require.main === module) {
+  connectDB()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`ShipDelight LR Server → http://localhost:${PORT}`);
+        console.log(`   DB: ${DB_NAME}`);
+      });
+    })
+    .catch(err => {
+      console.error('Failed to connect to MongoDB:', err.message);
+      process.exit(1);
     });
-  })
-  .catch(err => {
-    console.error('❌ Failed to connect to MongoDB:', err.message);
-    console.error('   Set MONGO_URI environment variable and retry.');
-    process.exit(1);
-  });
+}
