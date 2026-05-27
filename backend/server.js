@@ -20,7 +20,9 @@ const PORT = process.env.PORT || 3000;
 const IS_VERCEL = Boolean(process.env.VERCEL);
 
 // ── MONGODB CONFIG ────────────────────────────────────────────
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://micky:E9VTPG3QqDM1@st-db.shipdelight.com:27017/';
+// Vercel Marketplace MongoDB Atlas commonly provides MONGODB_URI.
+// Keep MONGO_URI as a backward-compatible alias for existing local setups.
+const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
 const DB_NAME   = process.env.DB_NAME   || 'smart_tracking';
 
 let lrPool;
@@ -33,6 +35,9 @@ let indexesEnsured = false;
 
 async function connectDB() {
   if (lrPool && lrUsed) return;
+  if (!MONGO_URI) {
+    throw new Error('Missing MongoDB connection string. Set MONGODB_URI (preferred) or MONGO_URI.');
+  }
 
   if (!connectPromise) {
     connectPromise = (async () => {
